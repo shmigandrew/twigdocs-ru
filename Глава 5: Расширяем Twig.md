@@ -334,3 +334,234 @@ class Twig_Node_Expression_Test_Odd extends Twig_Node_Expression_Test
 - Описать класс парсера (```token parser```)
 - Описать класс узла (```node class```)
 - Зарегистрировать тег.
+
+###### Регистрация нового тега
+
+Добавить новый тег так же просто, как вызвать метод ```addTokenParser``` экземпляра класса ```Twig_Environment```:
+
+```php
+$twig = new Twig_Environment($loader);
+$twig->addTokenParser(new Project_Set_TokenParser());
+```
+
+###### Определение парсера токенов
+
+Теперь двайте взглянем на код ```Project_Set_TokenParser```:
+
+```php
+class Project_Set_TokenParser extends Twig_TokenParser
+{
+  public function parse(Twig_Token $token)
+  {
+    $parser = $this->parser;
+    $stream = $parser->getStream();
+    
+    $name = $stream->expect(Twig_Token::NAME_TYPE)->getValue();
+    $stream->expect(Twig_Token::OPERATOR_TYPE, '=');
+    $value = $parser->getExpressionParser()->parseExpression();
+    $stream->expect(Twig_Token::BLOCK_END_TYPE);
+    
+    return new Project_Set_Node($name, $value, $token->getLine(), $this->getTag());
+  }
+  
+  public function getTag()
+  {
+    return 'set';
+  }
+}
+```
+
+Метод ```getTag()``` должен возвращать название тега, которое мы хотим использовать, в нашем случае - ```set```. 
+
+Метод ```parse()``` будет вызван каждый раз, когда будет встречаться тег ```set```. Метод должен возвращать экземпляр класса ```Twig_Node```, который представляет собой узловой элемент (создание ```Project_Set_Node``` будет рассмотрено позднее). 
+
+Процесс парсинга упрощён благодаря использованию некоторых методов, которые можно вызвать из потока (```$this->parser->getStream()```):
+
+- ```getCurrent()```: возвращает текущий токен в потоке.
+- ```next()```: Перемещается к новому токену в потоке, но возвращает предыдущий токен.
+- ```test($type)```, ```test($value)```, ```test($type, $value)```: проверяет, если текущий токен является определенного типа и равен определенному значению. ```$value``` может быть массивом допустимых значений.
+- ```expect($type[, $value, [, $message]])```: если текущий токен не является определенного типа или значения, то будет выброшено исключение. Если токен является определенного типа и значения, то он будет возвращен и поток перейдёт к следующему токену.
+- ```look()```: просматривает следующий токен без его обработки.
+
+Парсинг выражения выполняется посредством вызова метода ```parseExpression()```.
+
+Изучение кода существующих классов ```Token_Parser``` это лучший способ изучить мельчайшие особенности написания и создания собственных тегов и самого процесса парсинга.
+
+###### Определение узла
+
+Класс ```Project_Set_Node``` достаточно простой сам по себе:
+
+```php
+class Project_Set_Node extends Twig_Node
+{
+  public function __construct($name, Twig_Node_Expression $value, $line, $tag = null)
+  {
+    pareturn::__construct(array('value' => $value), array('name' => $name), $line, $tag);
+  }
+  
+  public function compile(Twig_Compiler $compiler)
+  {
+    $compiler
+      ->addDebugInfo($this)
+      ->write('$context[\''.$this->getAttribute('name').'\'] = ')
+      ->subcompile($this->getNode('value'))
+      ->raw(';\n')
+  }
+}
+```
+
+Компилятор реализует гибкий интерфейс и предоставляет разработчику методы, которые позволяют генерировать красивый и легко читаемый PHP-код:
+
+- ```subcompile()```: компилирует узел.
+- ```raw()```: выводит указанную строку в исходном виде.
+- ```write()```: выводит указанную строку добавляя отступ в начале каждой строки.
+- ```string()```: выводит строку в кавычках.
+- ```repr()```: выводит PHP-представление переданного значения.
+- ```addDebugInfo()```: добавляет строку из оригинального файла шаблона в текущий узел в качестве комментария.
+- ```indent()```: форматирует генерируемый код.
+- ```outdent()```: отменяет форматирование сгенерированного кода.
+
+###### Создаём расширение
+
+Наиболее частая причина написания расширений это перенос часто используемого кода в удобные для переиспользования классы, например, как в случае с локализацией. Расширение может определять теги, фильтры, тесты, операторы, глобальные переменные, функции, и обработчики узлов.
+
+Чаще всего будет значительно удобнее хранить все ваши дополнения, вроде тегов, функций или тестов, в едином расширении для вашего проекта. 
+
+При упаковке кода в дополнения, Twig достаточно умён, чтобы при каждом изменении исходного кода осуществить перекомпиляцию (при активной опции ```auto_reload```).
+
+Перед тем как писать собственные расширения, взгляните на официальный репозиторий: [http://github.com/twigphp/Twig-extensions](http://github.com/twigphp/Twig-extensions).
+
+Расширение представляет собой класс, который должен реализовывать следующий интерфейс:
+
+```php
+interface Twig_ExtensionInterface
+{
+  /**
+  * Возвращает экземпляр парсера токенов для добавление к существующему списку.
+  * @return Twig_TokenParserInterface[]
+  */
+  public function getTokenParsers();
+  
+  /**
+  * Возвращает экземпляр просмотрщика узлов для добавления к существующему списку.
+  * @return Twig_NodeVisitorInterface[]
+  */
+  public function getNodeVisitors();
+  
+  /**
+  * Возвращает список фильтров для добавления к существующему списку.
+  * @return Twig_Filter[]
+  */
+  public function getFilters();
+  
+  /**
+  * Возвращает список тестов для добавления к существующему списку.
+  * @return Twig_Test[]
+  */
+  public function getTests();
+  
+  /**
+  * Возвращает список функций для добавления к существующему списку.
+  * @return Twig_Funstion[]
+  */
+  public function getFunctions();
+  
+  /**
+  * Возвращает список операторов для добавления к существующему списку.
+  * @return array<array> Первый массив - массив унарных операторов, второй массив - бинарных операторов.
+  */
+  public function getOperators();
+}
+```
+
+Для поддержания чистоты и простоты, рекомендуется наследовать собственный класс расширения от ```Twig_Extension```:
+
+```php
+class Project_Twig_Extension extends Twig_Extendion {}
+```
+
+Конечно же очевидно, что такое расширение не обладает полезными функциями, но этим мы займёмся в следующем разделе. Twig не оглашает жестких требований к расположения файла расширения, потому что каждое расширение должно быть зарегистрировано в среде окружения явно.
+
+Для регистрации расширения достаточно вызвать метод ```addExtension()``` экземпляра класса ```Twig_Environment```:
+
+```php
+$twig = new Twig_Environment($loader);
+$twig->addExtension(new Project_Twig_Extension());
+```
+
+Расширения Twig, которые поставляются по-умолчанию являются замечательным примером того, как должны работать расширения.
+
+###### Глобальные переменные
+
+Глобальные переменные могут быть зарегистрированы в расширении при помощи метода ```getGlobals()```:
+
+```php
+class Project_Twig_Extension extends Twig_Extension implements Twig_Extension_GlobalsInterface
+{
+  public function getGlobals()
+  {
+    return array(
+      'text' => new Text()
+    );
+  }
+  
+  // ...
+}
+```
+
+###### Функции
+
+Функции могут быть зарегистрированы в расширении при помощи метода ```getFunctions()```:
+
+```php
+class Project_Twig_Extension extends Twig_Extension
+{
+  public function getFunctions()
+  {
+    return array(
+      new Twig_Function('lipsum', 'generate_lipsum')
+    );
+  }
+  
+  // ...
+}
+```
+
+###### Фильтры
+
+Фильтры могут быть зарегистрированы в расширении при помощи метода ```getFilters()```:
+
+```php
+class Project_Twig_Extension extends Twig_Extension
+{
+  public function getFilters()
+  {
+    return array(
+      new Twig_Filter('rot13', 'str_rot13')
+    );
+  }
+  
+  // ...
+}
+```
+
+###### Теги
+
+Теги могут быть зарегистрированы в расширении при помощи метода ```getTokenParsers()```:
+
+```php
+class Project_Twig_Extension extends Twig_Extension
+{
+  public function getTokenParsers()
+  {
+    return array(
+      new Project_Set_TokenParser()
+    );
+  }
+  
+  // ...
+}
+```
+
+В приведенном выше коде мы добавили только один тег, определенный классом ```Project_Set_TokenParser```. Класс ```Project_Set_TokenParser``` отвечает за парсинг и компилирование тега в код PHP-представления.
+
