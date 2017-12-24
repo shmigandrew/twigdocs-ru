@@ -565,3 +565,216 @@ class Project_Twig_Extension extends Twig_Extension
 
 В приведенном выше коде мы добавили только один тег, определенный классом ```Project_Set_TokenParser```. Класс ```Project_Set_TokenParser``` отвечает за парсинг и компилирование тега в код PHP-представления.
 
+###### Операторы
+
+Метод ```getOperators()``` позволяет добавить новые операторы. Вот, например, как будет выглядеть добавление ```!```, ```||```, ```&&```:
+
+```php
+class Project_Twig_Extension extends Twig_Extension
+{
+  public function getOperators()
+  {
+    return array(
+      array(
+        '!' => array('precedence' => 50, 'class' => 'Twig_Node_Expression_Unary_Not'),
+      ),
+      array(
+        '||' => array('precedence' => 10, 'class' => 'Twig_Node_Expression_Binary_Or', 'associativity' => Twig_ExpressionParser::OPERATOR_LEFT),
+        '&&' => array('precedence' => 15, 'class' => 'Twig_Node_Expression_Binary_And', 'associativity' => Twig_ExpressionParser::OPERATOR_LEFT)
+      ),
+    );
+  }
+  
+  // ...
+}
+```
+
+###### Тесты
+
+Метод ```getTests()``` позволяет добавить новые тесты:
+
+```php
+class Project_Twig_Extension extends Twig_Extension
+{
+  public function getTests()
+  {
+    return array(
+      new Twig_Test('even', 'twig_test_even'),
+    );
+  }
+}
+```
+
+###### Определять заранее или во время выполнения
+
+Фильтры, функции или тесты могут быть определены на этапе выполнения и быть типа ```callable```:
+
+- функции или статичные методы: быстрые для реализации и простые; сложности заключаются в зависимостях от других объектов на этапе выполнения.
+- замыкания (```closure```): просты в реализации;
+- методы объектов: предоставляют большую гибкость, если выполнение кода зависит от состояния внешних объектов.
+
+Самый простой способ определить метод, это описать его прямо в классе расширения:
+
+```php
+class Project_Twig_Extension extends Twig_Extension
+{
+  private $rot13Provider;
+  
+  public function __construct($rot13Provider)
+  {
+    $this->rot13Provider = $rot13Provider;
+  }
+  
+  public function getFunctions()
+  {
+    return array(
+      new Twig_Function('rot13', array($this, 'rot13')),
+    );
+  }
+  
+  public function rot13($value)
+  {
+    return $rot13Provider->rot13($value);
+  }
+}
+```
+
+Это очень простой и понятный способ, однако он не рекомендован для реализации потому, что ставит компиляцию шаблона в зависимость от внешнего объекта, которая может быть и вовсе не нужна. 
+
+У вас есть возможность разделить определение от реализации через регистрацию экземпляра класса ```Twig_RuntimeLoaderIntarface``` и зарегистрировать в среде окружения, которая уже знает, как инициировать экземпляры определенного класса:
+
+```php
+class RuntimeLoader extends Twig_RuntimeLoaderInterface
+{
+  public function load($class)
+  {
+    // реализуйте логику инициирования класса $class
+    // и внедрение зависимостей
+    // в большинстве случаев это означает использование собственного контейнера зависимостей
+    if ('Project_Twig_RuntimeExtension' === $class) {
+      return new $class(new Rot13Provider);
+    } else {
+      // ...
+    }
+  }
+}
+
+$twig->addRuntimeLoader(new RuntimeLoader());
+```
+
+Twig поставляется с [PSR-11 совместимым загрузчиком](http://www.php-fig.org/psr/psr-11/) ```Twig_ContainerRuntimeLoader```.
+
+Теперь возможен перенос логики этапа выполнения в новый класс ```Project_Twig_RuntimeExtension``` и прямое использование прямо в расширении:
+
+```php
+class Project_Twig_RuntimeExtension
+{
+  private $rot13Provider;
+  
+  public function __construct($rot13Provider)
+  {
+    $this->rot13Provider = $rot13Provider;
+  }
+  
+  public function rot13($value)
+  {
+    return $this->rot13Provider->rot13($value);
+  }
+}
+
+class Project_Twig_Extension extends Twig_Extension
+{
+  public function getFunctions()
+  {
+    return array(
+      new Twig_Function('rot13', array('Project_Twig_RuntimeExtension', 'rot13')),
+      // или
+      new Twig_Function('rot13', 'Project_Twig_RuntimeExtension::rot13'),
+    );
+  }
+}
+```
+
+###### Перегрузка
+
+Чтобы переопределить / перегрузить существующие фильтры, функции, тесты, операторы или глобальные переменные, необходимо добавить новое определение _после_ переобределяемой сущности (порядок имеет значение).
+
+```php
+class MyCoreExtension extends Twig_Extension
+{
+  public function getFilters()
+  {
+    return array(
+      new Twig_Filter('date', array($this, 'dateFilter')),
+    );
+  }
+  
+  public function dateFilter($timestamp, $format = 'Y/m/d H:i:s')
+  {
+    // ...
+  }
+}
+
+$twig = new Twig_Exnvironment($loader);
+$twig->addExtension(new MyCoreExtension());
+```
+
+В приведённом выше коде мы переобпределили встроенный фильтр ```date```.
+
+Учтите, что при добавлении фильтра непосредственно в среду окружения ```Twig_Environment```, приоритетность выше у встроенных сущностей, а не регистрируемых позже расширений:
+
+```php
+$twig = new Twig_Environment($loader);
+$twig->addFilter(new Twig_Filter('date', function($timestamp, $format = 'Y/m/d H:i:s') {
+  // ...
+}));
+
+// определение фильтра date будет использовано из приведенного выше, а не добавляемого через расширение ниже
+$twig->addExtension(new MyCoreExtension());
+```
+
+Имейте ввиду, что переопределение встроенных элементов Twig не является рекомендованным, так как в дальнейшем может привести к путанице.
+
+###### Тестирование расширений
+
+- Функциональное тестирование
+
+Для создание функциональных тестов расширений достаточно воссоздать следующую структуру директорий в тестовой директории:
+
+```twig
+Fixtures/
+  filters/
+    foo.test
+    bar.test
+  functions/
+    foo.test
+    bar.test
+  tags/
+    foo.test
+    bar.test
+IntegrationTest.php
+```
+
+Файл ```IntegrationTest.php``` должен выглядеть следующим образом:
+
+```php
+class Project_Tests_IntegrationTest extends Twig_Test_IntegrationTestCase
+{
+  public function getExtensions()
+  {
+    return array(
+      new Project_Twig_Extension1(),
+      new Project_Twig_Extension2(),
+    );
+  }
+  
+  public function getFixturesDir()
+  {
+    return dirname(__FILE__) . '/Fixtures/';
+  }
+}
+```
+
+- Тестирование узлов
+
+Тестирование просмотрщика узлов может быть достаточно сложной задаче, используется класс ```Twig_Test_NodeTestCase```. Примеры могут быть найдены по ссылке [https://github.com/twigphp/Twig/tree/master/test/Twig/Tests/Node](https://github.com/twigphp/Twig/tree/master/test/Twig/Tests/Node).
