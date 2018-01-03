@@ -72,13 +72,14 @@
 
 {% block content %}
   {% embed 'vertical_boxes_skeleton.twig' %}
-  {% block top %}
-    Содержимое верхнего блока
-  {% endblock %}
+    {% block top %}
+      Содержимое верхнего блока
+    {% endblock %}
   
-  {% block bottom %}
-    Содержимое нижнего блока
-  {% endblock %}
+    {% block bottom %}
+      Содержимое нижнего блока
+    {% endblock %}
+  {% endembed %}
 {% endblock %}
 ```
 
